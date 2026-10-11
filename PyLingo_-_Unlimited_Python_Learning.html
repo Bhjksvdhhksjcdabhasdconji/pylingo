@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PyLingo - Free & Unlimited Python Learning</title>
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            green: '#58cc02',
+                            greenDark: '#46a302',
+                            lightGreen: '#89e219',
+                            blue: '#1cb0f6',
+                            blueDark: '#0f82c9',
+                            purple: '#ce82ff',
+                            purpleDark: '#a545ee',
+                            yellow: '#ffc800',
+                            yellowDark: '#e5a100',
+                            red: '#ff4b4b',
+                            redDark: '#ea2b2b',
+                            cardBg: '#202f36',
+                            darkBg: '#131f24',
+                            darkBorder: '#37464f',
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Nunito', 'Segoe UI', 'sans-serif'],
+                    },
+                    boxShadow: {
+                        '3d-green': '0 4px 0 #46a302',
+                        '3d-green-lg': '0 6px 0 #46a302',
+                        '3d-blue': '0 4px 0 #0f82c9',
+                        '3d-purple': '0 4px 0 #a545ee',
+                        '3d-yellow': '0 4px 0 #e5a100',
+                        '3d-red': '0 4px 0 #ea2b2b',
+                        '3d-gray': '0 4px 0 #e5e5e5',
+                        '3d-dark': '0 4px 0 #37464f',
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Nunito -->
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Canvas Confetti -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <!-- Pyodide Python Runner CDN -->
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.23.4/full/pyodide.js"></script>
+
+    <style>
+        body {
+            font-family: 'Nunito', sans-serif;
+            user-select: none;
+        }
+        
+        .pulse-subtle {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.95; transform: scale(1.02); }
+        }
+
+        .bounce-gentle {
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(-3%); animation-timing-function: cubic-bezier(0.8,0,1,1); }
+            50% { transform: translateY(0); animation-timing-function: cubic-bezier(0,0,0.2,1); }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #131f24;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #37464f;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #4b5d67;
+        }
+    </style>
+</head>
+<body class="bg-[#131f24] text-white min-h-screen flex flex-col md:flex-row overflow-x-hidden">
+
+    <!-- Firebase JS Integration Module -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global state container attached to window
+        window.PyLingoFirebase = {
+            app: null,
+            db: null,
+            auth: null,
+            user: null,
+            appId: typeof __app_id !== 'undefined' ? __app_id : 'pylingo-default-app',
+            isSyncing: false,
+
+            init: async function() {
+                try {
+                    const firebaseConfig = typeof __firebase_config !== 'undefined' 
+                        ? JSON.parse(__firebase_config) 
+                        : null;
+
+                    if (!firebaseConfig) {
+                        console.warn("Firebase config not found. Running in offline/local storage mode.");
+                        return;
+                    }
+
+                    this.app = initializeApp(firebaseConfig);
+                    this.db = getFirestore(this.app);
+                    this.auth = getAuth(this.app);
+
+                    // Auth handler
+                    const token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                    if (token) {
+                        await signInWithCustomToken(this.auth, token);
+                    } else {
+                        await signInAnonymously(this.auth);
+                    }
+
+                    onAuthStateChanged(this.auth, async (u) => {
+                        if (u) {
+                            this.user = u;
+                            console.log("Logged in with UID:", u.uid);
+                            document.getElementById('cloud-status').classList.remove('hidden');
+                            document.getElementById('cloud-user-id').textContent = u.uid.substring(0, 8) + '...';
+                            await this.loadProgress();
+                        }
+                    });
+                } catch (e) {
+                    console.error("Firebase Initialization Error:", e);
+                }
+            },
+
+            saveProgress: async function(stateData) {
+                if (!this.db || !this.user) return;
+                this.isSyncing = true;
+                this.updateSyncUI();
+                try {
+                    const userDocRef = doc(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'user_data', 'profile');
+                    await setDoc(userDocRef, {
+                        ...stateData,
+                        lastUpdated: new Date().toISOString()
+                    }, { merge: true });
+                } catch (e) {
+                    console.error("Error saving progress to Cloud:", e);
+                } finally {
+                    this.isSyncing = false;
+                    this.updateSyncUI();
+                }
+            },
+
+            loadProgress: async function() {
+                if (!this.db || !this.user) return;
+                try {
+                    const userDocRef = doc(this.db, 'artifacts', this.appId, 'users', this.user.uid, 'user_data', 'profile');
+                    const snapshot = await getDoc(userDocRef);
+                    if (snapshot.exists()) {
+                        const data = snapshot.data();
+                        window.App.applyRemoteState(data);
+                    }
+                } catch (e) {
+                    console.error("Error loading progress from Cloud:", e);
+                }
+            },
+
+            updateSyncUI: function() {
+                const indicator = document.getElementById('sync-indicator');
+                if (indicator) {
+                    indicator.innerHTML = this.isSyncing 
+                        ? `<i class="fa-solid fa-rotate spin text-brand-yellow"></i> Syncing...`
+                        : `<i class="fa-solid fa-cloud-check text-brand-green"></i> Saved`;
+                }
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            window.PyLingoFirebase.init();
+        });
+    </script>
+
+    <!-- Sidebar Navigation -->
+    <aside class="w-full md:w-64 bg-[#131f24] border-b md:border-b-0 md:border-r border-[#37464f] p-4 flex flex-row md:flex-col justify-between items-center md:items-start z-30 shrink-0">
+        <!-- Logo -->
+        <div class="flex items-center gap-3 cursor-pointer" onclick="App.navigateTo('learn')">
+            <div class="w-10 h-10 bg-brand-green rounded-2xl flex items-center justify-center text-white text-2xl font-black shadow-3d-green">
+                🐍
+            </div>
+            <span class="text-2xl font-black tracking-wider text-brand-green hidden sm:inline">PyLingo</span>
+        </div>
+
+        <!-- Nav Items -->
+        <nav class="flex md:flex-col gap-2 md:w-full my-0 md:my-8">
+            <button onclick="App.navigateTo('learn')" id="nav-learn" class="nav-btn active flex items-center gap-4 px-4 py-3 rounded-xl font-bold uppercase tracking-wider text-sm w-full transition-all text-brand-blue bg-[#202f36] border-2 border-brand-blue">
+                <i class="fa-solid fa-house text-xl"></i>
+                <span class="hidden md:inline">Learn Path</span>
+            </button>
+
+            <button onclick="App.navigateTo('sandbox')" id="nav-sandbox" class="nav-btn flex items-center gap-4 px-4 py-3 rounded-xl font-bold uppercase tracking-wider text-sm w-full transition-all text-gray-400 hover:bg-[#202f36] hover:text-white border-2 border-transparent">
+                <i class="fa-solid fa-code text-xl"></i>
+                <span class="hidden md:inline">Code Sandbox</span>
+            </button>
+
+            <button onclick="App.navigateTo('leaderboard')" id="nav-leaderboard" class="nav-btn flex items-center gap-4 px-4 py-3 rounded-xl font-bold uppercase tracking-wider text-sm w-full transition-all text-gray-400 hover:bg-[#202f36] hover:text-white border-2 border-transparent">
+                <i class="fa-solid fa-trophy text-xl"></i>
+                <span class="hidden md:inline">Leaderboard</span>
+            </button>
+
+            <button onclick="App.navigateTo('achievements')" id="nav-achievements" class="nav-btn flex items-center gap-4 px-4 py-3 rounded-xl font-bold uppercase tracking-wider text-sm w-full transition-all text-gray-400 hover:bg-[#202f36] hover:text-white border-2 border-transparent">
+                <i class="fa-solid fa-award text-xl"></i>
+                <span class="hidden md:inline">Quests</span>
+            </button>
+        </nav>
+
+        <!-- Unlimited Lives Banner Info -->
+        <div class="hidden md:block w-full bg-[#202f36] p-4 rounded-2xl border-2 border-brand-purple/40 text-center">
+            <div class="flex justify-center items-center gap-2 text-brand-red mb-1">
+                <i class="fa-solid fa-heart-pulse text-2xl animate-pulse"></i>
+                <i class="fa-solid fa-infinity text-xl font-black text-brand-purple"></i>
+            </div>
+            <p class="font-extrabold text-sm text-white">100% Free Forever</p>
+            <p class="text-xs text-gray-400 mt-1">No Heart Loss or Paywalls. Make endless mistakes to learn!</p>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 flex flex-col min-h-screen relative overflow-y-auto">
+        
+        <!-- Top Stats Bar -->
+        <header class="sticky top-0 bg-[#131f24]/95 backdrop-blur border-b border-[#37464f] px-6 py-3 flex justify-between items-center z-20">
+            <!-- Left Side: Unlimited Badge -->
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 bg-[#202f36] px-3 py-1.5 rounded-xl border border-brand-purple/30 shadow-sm cursor-pointer" onclick="App.showUnlimitedModal()">
+                    <span class="relative flex h-3 w-3">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-brand-purple opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-3 w-3 bg-brand-purple"></span>
+                    </span>
+                    <i class="fa-solid fa-heart text-brand-red text-base"></i>
+                    <i class="fa-solid fa-infinity text-brand-purple text-sm font-black"></i>
+                    <span class="hidden sm:inline font-black text-xs uppercase tracking-wide text-brand-purple">Unlimited Lives Active</span>
+                </div>
+            </div>
+
+            <!-- Right Side: Stats (Streak, XP, Sync Status) -->
+            <div class="flex items-center gap-4 sm:gap-6">
+                <!-- Streak Counter -->
+                <div class="flex items-center gap-2 font-black text-brand-yellow" title="Daily Streak">
+                    <i class="fa-solid fa-fire text-xl bounce-gentle"></i>
+                    <span id="stat-streak" class="text-lg">1</span>
+                </div>
+
+                <!-- XP Points -->
+                <div class="flex items-center gap-2 font-black text-brand-blue" title="Total XP">
+                    <i class="fa-solid fa-[#1cb0f6] fa-bolt text-xl"></i>
+                    <span id="stat-xp" class="text-lg">0</span>
+                    <span class="text-xs font-bold text-gray-400">XP</span>
+                </div>
+
+                <!-- Cloud Sync Status -->
+                <div id="cloud-status" class="hidden text-xs text-gray-400 flex items-center gap-2 bg-[#202f36] px-3 py-1.5 rounded-xl border border-gray-700">
+                    <span id="sync-indicator"><i class="fa-solid fa-cloud text-brand-blue"></i> Cloud</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- VIEW 1: LEARN PATH (DUOLINGO MAP) -->
+        <section id="view-learn" class="view-panel p-4 sm:p-8 max-w-4xl mx-auto w-full flex-1 flex flex-col items-center">
+            
+            <!-- Hero Mascot Banner -->
+            <div class="w-full bg-gradient-to-r from-brand-greenDark to-brand-green p-6 rounded-3xl mb-8 flex flex-col sm:flex-row items-center justify-between shadow-3d-green gap-4 relative overflow-hidden">
+                <div class="z-10 text-center sm:text-left">
+                    <span class="bg-black/20 text-white font-extrabold text-xs uppercase px-3 py-1 rounded-full tracking-wider">Zero Paywall Guarantee</span>
+                    <h1 class="text-2xl sm:text-3xl font-black text-white mt-2">Master Python For Free!</h1>
+                    <p class="text-white/90 font-bold text-sm mt-1 max-w-md">Learn coding through interactive micro-lessons. Make mistakes safely with Unlimited Hearts!</p>
+                </div>
+                <div class="z-10 flex items-center justify-center bg-white/10 backdrop-blur p-4 rounded-2xl border border-white/20">
+                    <div class="text-6xl animate-bounce">🐍</div>
+                </div>
+                <!-- Decorative background elements -->
+                <div class="absolute -right-10 -bottom-10 w-40 h-40 bg-white/10 rounded-full blur-xl"></div>
+            </div>
+
+            <!-- Path Modules -->
+            <div id="units-container" class="w-full flex flex-col items-center gap-12 pb-16">
+                <!-- Dynamically generated units and lessons go here -->
+            </div>
+        </section>
+
+        <!-- VIEW 2: LESSON ENGINE (QUIZ/PRACTICE) -->
+        <section id="view-lesson" class="view-panel hidden fixed inset-0 bg-[#131f24] z-50 flex flex-col">
+            <!-- Lesson Header Bar -->
+            <div class="px-6 py-4 border-b border-[#37464f] flex items-center gap-4 max-w-4xl mx-auto w-full">
+                <button onclick="App.exitLesson()" class="text-gray-400 hover:text-white text-2xl font-black">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                
+                <!-- Progress Bar -->
+                <div class="flex-1 bg-[#202f36] h-4 rounded-full overflow-hidden p-0.5 border border-[#37464f]">
+                    <div id="lesson-progress-bar" class="bg-brand-green h-full rounded-full transition-all duration-300 w-0"></div>
+                </div>
+
+                <!-- Heart Icon with Unlimited Infinity -->
+                <div class="flex items-center gap-1 bg-brand-red/10 border border-brand-red/30 px-3 py-1 rounded-full text-brand-red font-black text-sm">
+                    <i class="fa-solid fa-heart"></i>
+                    <i class="fa-solid fa-infinity text-xs"></i>
+                </div>
+            </div>
+
+            <!-- Question Container -->
+            <div class="flex-1 max-w-2xl mx-auto w-full p-6 flex flex-col justify-between overflow-y-auto">
+                <div id="question-card" class="flex-1 flex flex-col">
+                    <!-- Dynamic Question Content Inserted Here -->
+                </div>
+
+                <!-- Bottom Action / Feedback Footer -->
+                <div id="lesson-footer" class="pt-6 border-t border-[#37464f] flex flex-col gap-4">
+                    <div id="feedback-banner" class="hidden p-4 rounded-2xl flex items-center gap-4">
+                        <div id="feedback-icon" class="text-3xl"></div>
+                        <div class="flex-1">
+                            <h4 id="feedback-title" class="font-black text-lg"></h4>
+                            <p id="feedback-msg" class="text-sm font-bold opacity-90"></p>
+                        </div>
+                    </div>
+
+                    <button id="btn-check-answer" onclick="App.checkAnswer()" class="w-full py-4 bg-brand-green hover:bg-brand-greenDark text-white font-black text-lg uppercase tracking-wider rounded-2xl shadow-3d-green transition-all transform active:translate-y-1 active:shadow-none">
+                        Check Answer
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 3: CODE SANDBOX -->
+        <section id="view-sandbox" class="view-panel hidden p-4 sm:p-8 max-w-5xl mx-auto w-full flex-1 flex flex-col">
+            <div class="mb-6 flex justify-between items-center">
+                <div>
+                    <h2 class="text-2xl font-black text-white flex items-center gap-2">
+                        <i class="fa-solid fa-terminal text-brand-blue"></i> Live Python Playground
+                    </h2>
+                    <p class="text-gray-400 text-sm">Write real Python code and execute it instantly in your browser!</p>
+                </div>
+                <button onclick="App.runSandboxCode()" class="px-6 py-3 bg-brand-green hover:bg-brand-greenDark text-white font-black rounded-xl shadow-3d-green flex items-center gap-2">
+                    <i class="fa-solid fa-play"></i> Run Code
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                <!-- Editor -->
+                <div class="bg-[#202f36] rounded-2xl border border-[#37464f] flex flex-col overflow-hidden">
+                    <div class="bg-[#18252a] px-4 py-2 border-b border-[#37464f] flex justify-between items-center text-xs text-gray-400 font-mono">
+                        <span>main.py</span>
+                        <button onclick="App.resetSandbox()" class="hover:text-white"><i class="fa-solid fa-rotate-left"></i> Reset</button>
+                    </div>
+                    <textarea id="sandbox-editor" class="w-full flex-1 p-4 bg-transparent font-mono text-sm text-green-400 resize-none focus:outline-none" spellcheck="false"># Free Python Coding Sandbox
+def greet(name):
+    return f"Hello, {name}! Welcome to PyLingo!"
+
+user = "Python Learner"
+print(greet(user))
+
+# Try creating a list or loop!
+for i in range(1, 4):
+    print(f"Practice count: {i}")
+</textarea>
+                </div>
+
+                <!-- Console Output -->
+                <div class="bg-black/80 rounded-2xl border border-[#37464f] flex flex-col overflow-hidden font-mono text-sm">
+                    <div class="bg-[#18252a] px-4 py-2 border-b border-[#37464f] text-xs text-gray-400 flex justify-between">
+                        <span>Console Output</span>
+                        <span id="pyodide-status" class="text-brand-yellow">Initializing Python Engine...</span>
+                    </div>
+                    <pre id="sandbox-output" class="p-4 text-gray-200 flex-1 overflow-y-auto whitespace-pre-wrap">Click "Run Code" to execute Python code...</pre>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 4: LEADERBOARD -->
+        <section id="view-leaderboard" class="view-panel hidden p-4 sm:p-8 max-w-2xl mx-auto w-full flex-1">
+            <div class="text-center mb-8">
+                <div class="inline-block p-4 bg-brand-yellow/10 rounded-full text-brand-yellow text-4xl mb-2 border border-brand-yellow/30">
+                    🏆
+                </div>
+                <h2 class="text-3xl font-black text-white">Global Python League</h2>
+                <p class="text-gray-400 text-sm mt-1">Compete with learners worldwide. Earn XP to climb the ranks!</p>
+            </div>
+
+            <div class="bg-[#202f36] rounded-2xl border border-[#37464f] overflow-hidden">
+                <div id="leaderboard-list" class="divide-y divide-[#37464f]">
+                    <!-- Dynamically generated leaderboard -->
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 5: ACHIEVEMENTS / QUESTS -->
+        <section id="view-achievements" class="view-panel hidden p-4 sm:p-8 max-w-3xl mx-auto w-full flex-1">
+            <div class="mb-8">
+                <h2 class="text-3xl font-black text-white flex items-center gap-3">
+                    <i class="fa-solid fa-medal text-brand-yellow"></i> Quests & Achievements
+                </h2>
+                <p class="text-gray-400 text-sm mt-1">Complete goals to unlock badges and earn bonus XP!</p>
+            </div>
+
+            <div id="quests-container" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <!-- Dynamic Quests -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MODAL: UNLIMITED LIVES EXPLANATION -->
+    <div id="modal-unlimited" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-[#202f36] border-2 border-brand-purple rounded-3xl max-w-md w-full p-6 text-center shadow-2xl relative">
+            <button onclick="App.hideUnlimitedModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white text-xl">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <div class="w-16 h-16 bg-brand-purple/20 text-brand-purple rounded-full flex items-center justify-center text-3xl mx-auto mb-4 border border-brand-purple">
+                <i class="fa-solid fa-infinity"></i>
+            </div>
+            <h3 class="text-2xl font-black text-white mb-2">Unlimited Hearts Active!</h3>
+            <p class="text-gray-300 text-sm mb-6 leading-relaxed">
+                At PyLingo, we believe learning should be <strong class="text-brand-green">100% Free</strong> for everyone. You never run out of hearts or get locked behind a paywall. Make as many code mistakes as you need!
+            </p>
+            <button onclick="App.hideUnlimitedModal()" class="w-full py-3 bg-brand-purple hover:bg-brand-purpleDark text-white font-black rounded-xl shadow-3d-purple uppercase tracking-wider">
+                Keep Learning Free
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Data Structure for Course Path & Lessons
+        const COURSE_DATA = [
+            {
+                unitId: 1,
+                title: "Unit 1: Python Basics",
+                description: "Print statements, strings, and basic math",
+                color: "green",
+                lessons: [
+                    {
+                        id: "u1_l1",
+                        title: "Hello Python",
+                        xp: 15,
+                        questions: [
+                            {
+                                type: "mcq",
+                                prompt: "Which function is used in Python to display text on the screen?",
+                                options: ["console.log()", "print()", "echo()", "write()"],
+                                answer: 1,
+                                explanation: "The print() function outputs formatted text to the console."
+                            },
+                            {
+                                type: "fill",
+                                prompt: "Complete the code to print 'Hello World':",
+                                codeBefore: "",
+                                codeAfter: "('Hello World')",
+                                answer: "print",
+                                explanation: "In Python, print(...) is used to output values."
+                            },
+                            {
+                                type: "blocks",
+                                prompt: "Tap blocks to build a valid print statement:",
+                                blocks: ["print", "(\"PyLingo\")", "echo", "console.log"],
+                                target: ["print", "(\"PyLingo\")"],
+                                explanation: "print(\"PyLingo\") displays the string."
+                            }
+                        ]
+                    },
+                    {
+                        id: "u1_l2",
+                        title: "Variables & Types",
+                        xp: 20,
+                        questions: [
+                            {
+                                type: "mcq",
+                                prompt: "How do you create a variable named 'x' with value 5?",
+                                options: ["var x = 5", "int x = 5", "x = 5", "x := 5"],
+                                answer: 2,
+                                explanation: "Python uses simple assignment with = without explicit type declarations."
+                            },
+                            {
+                                type: "fill",
+                                prompt: "Store integer 10 inside the variable 'age':",
+                                codeBefore: "",
+                                codeAfter: " = 10",
+                                answer: "age",
+                                explanation: "Variables are defined by writing their name followed by =."
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                unitId: 2,
+                title: "Unit 2: Logic & Decisions",
+                description: "If statements, booleans, and comparisons",
+                color: "blue",
+                lessons: [
+                    {
+                        id: "u2_l1",
+                        title: "If Statements",
+                        xp: 25,
+                        questions: [
+                            {
+                                type: "mcq",
+                                prompt: "Which keyword introduces a conditional block in Python?",
+                                options: ["when", "if", "check", "cond"],
+                                answer: 1,
+                                explanation: "The 'if' keyword checks if a condition evaluates to True."
+                            },
+                            {
+                                type: "blocks",
+                                prompt: "Assemble code to check if score > 50:",
+                                blocks: ["if", "score", "> 50:", "then"],
+                                target: ["if", "score", "> 50:"],
+                                explanation: "Python conditional syntax: if condition:"
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                unitId: 3,
+                title: "Unit 3: Loops & Lists",
+                description: "Iterating through data with For and While loops",
+                color: "purple",
+                lessons: [
+                    {
+                        id: "u3_l1",
+                        title: "Python Lists",
+                        xp: 30,
+                        questions: [
+                            {
+                                type: "mcq",
+                                prompt: "How do you define a list in Python?",
+                                options: ["{1, 2, 3}", "[1, 2, 3]", "(1, 2, 3)", "<1, 2, 3>"],
+                                answer: 1,
+                                explanation: "Square brackets [] are used to define Python lists."
+                            }
+                        ]
+                    }
+                ]
+            }
+        ];
+
+        // Quests / Achievements Data
+        const QUESTS_DATA = [
+            { id: "q1", title: "First Step", desc: "Complete 1 Lesson", target: 1, xpReward: 50, icon: "🎯" },
+            { id: "q2", title: "Python Apprentice", desc: "Reach 50 Total XP", target: 50, xpReward: 100, icon: "⚡" },
+            { id: "q3", title: "Master Learner", desc: "Complete 3 Lessons", target: 3, xpReward: 150, icon: "👑" }
+        ];
+
+        // App Engine Controller Object
+        window.App = {
+            state: {
+                xp: 0,
+                streak: 1,
+                completedLessons: [],
+                currentLesson: null,
+                currentQuestionIdx: 0,
+                selectedBlockTokens: [],
+                pyodideReady: false
+            },
+
+            pyodide: null,
+
+            init: async function() {
+                this.loadLocalStorage();
+                this.renderLearnPath();
+                this.renderQuests();
+                this.renderLeaderboard();
+                this.updateStatsUI();
+                this.initPyodideEngine();
+            },
+
+            // Pyodide Python Sandbox Loading
+            initPyodideEngine: async function() {
+                const statusEl = document.getElementById('pyodide-status');
+                try {
+                    this.pyodide = await loadPyodide();
+                    this.state.pyodideReady = true;
+                    if (statusEl) {
+                        statusEl.textContent = "Engine Ready";
+                        statusEl.className = "text-brand-green font-bold";
+                    }
+                } catch (e) {
+                    console.error("Pyodide Load Error:", e);
+                    if (statusEl) statusEl.textContent = "Offline Mode";
+                }
+            },
+
+            // State Storage Management
+            loadLocalStorage: function() {
+                const saved = localStorage.getItem('pylingo_user_data');
+                if (saved) {
+                    try {
+                        const parsed = JSON.parse(saved);
+                        this.state.xp = parsed.xp || 0;
+                        this.state.streak = parsed.streak || 1;
+                        this.state.completedLessons = parsed.completedLessons || [];
+                    } catch(e) {}
+                }
+            },
+
+            saveState: function() {
+                const stateToSave = {
+                    xp: this.state.xp,
+                    streak: this.state.streak,
+                    completedLessons: this.state.completedLessons
+                };
+                localStorage.setItem('pylingo_user_data', JSON.stringify(stateToSave));
+                
+                // Sync to Firebase if available
+                if (window.PyLingoFirebase) {
+                    window.PyLingoFirebase.saveProgress(stateToSave);
+                }
+            },
+
+            applyRemoteState: function(remoteData) {
+                if (remoteData.xp !== undefined) this.state.xp = remoteData.xp;
+                if (remoteData.streak !== undefined) this.state.streak = remoteData.streak;
+                if (remoteData.completedLessons) this.state.completedLessons = remoteData.completedLessons;
+                this.updateStatsUI();
+                this.renderLearnPath();
+                this.renderQuests();
+            },
+
+            updateStatsUI: function() {
+                document.getElementById('stat-xp').textContent = this.state.xp;
+                document.getElementById('stat-streak').textContent = this.state.streak;
+            },
+
+            // View Navigation
+            navigateTo: function(viewName) {
+                document.querySelectorAll('.view-panel').forEach(el => el.classList.add('hidden'));
+                const target = document.getElementById(`view-${viewName}`);
+                if (target) target.classList.remove('hidden');
+
+                // Update active nav button
+                document.querySelectorAll('.nav-btn').forEach(btn => {
+                    btn.classList.remove('active', 'text-brand-blue', 'bg-[#202f36]', 'border-brand-blue');
+                    btn.classList.add('text-gray-400', 'border-transparent');
+                });
+                const activeBtn = document.getElementById(`nav-${viewName}`);
+                if (activeBtn) {
+                    activeBtn.classList.add('active', 'text-brand-blue', 'bg-[#202f36]', 'border-brand-blue');
+                    activeBtn.classList.remove('text-gray-400', 'border-transparent');
+                }
+            },
+
+            // Render Dynamic Course Path
+            renderLearnPath: function() {
+                const container = document.getElementById('units-container');
+                container.innerHTML = '';
+
+                COURSE_DATA.forEach(unit => {
+                    const unitDiv = document.createElement('div');
+                    unitDiv.className = "w-full flex flex-col items-center gap-6";
+
+                    // Unit Header
+                    unitDiv.innerHTML = `
+                        <div class="w-full bg-[#202f36] border-2 border-[#37464f] p-4 rounded-2xl flex justify-between items-center">
+                            <div>
+                                <h3 class="font-black text-xl text-white">${unit.title}</h3>
+                                <p class="text-xs text-gray-400">${unit.description}</p>
+                            </div>
+                            <div class="px-3 py-1 bg-brand-green/10 text-brand-green font-bold text-xs rounded-full border border-brand-green/30">
+                                Unlimited Hearts
+                            </div>
+                        </div>
+                        <div class="flex flex-col items-center gap-6 relative w-full">
+                    `;
+
+                    const lessonsContainer = unitDiv.querySelector('.flex.flex-col');
+
+                    unit.lessons.forEach((lesson, index) => {
+                        const isCompleted = this.state.completedLessons.includes(lesson.id);
+                        // Offset curve design for Duolingo path style
+                        const offsets = ['translate-x-0', 'translate-x-8', 'translate-x-0', '-translate-x-8'];
+                        const offsetClass = offsets[index % offsets.length];
+
+                        const lessonBtn = document.createElement('button');
+                        lessonBtn.onclick = () => this.startLesson(lesson);
+                        lessonBtn.className = `w-20 h-20 rounded-full font-black text-2xl flex items-center justify-center transition-all transform hover:scale-105 shadow-3d-green relative ${offsetClass} ${
+                            isCompleted ? 'bg-brand-green text-white shadow-3d-green' : 'bg-brand-blue text-white shadow-3d-blue'
+                        }`;
+
+                        lessonBtn.innerHTML = `
+                            ${isCompleted ? '<i class="fa-solid fa-check"></i>' : '🐍'}
+                            <span class="absolute -bottom-6 text-xs font-bold text-gray-300 whitespace-nowrap bg-[#131f24] px-2 py-0.5 rounded border border-[#37464f]">
+                                ${lesson.title}
+                            </span>
+                        `;
+
+                        lessonsContainer.appendChild(lessonBtn);
+                    });
+
+                    container.appendChild(unitDiv);
+                });
+            },
+
+            // Lesson Engine Logic
+            startLesson: function(lesson) {
+                this.state.currentLesson = lesson;
+                this.state.currentQuestionIdx = 0;
+                document.getElementById('view-lesson').classList.remove('hidden');
+                this.renderCurrentQuestion();
+            },
+
+            exitLesson: function() {
+                document.getElementById('view-lesson').classList.add('hidden');
+            },
+
+            renderCurrentQuestion: function() {
+                const lesson = this.state.currentLesson;
+                const question = lesson.questions[this.state.currentQuestionIdx];
+                const card = document.getElementById('question-card');
+                const progressBar = document.getElementById('lesson-progress-bar');
+                const footerBanner = document.getElementById('feedback-banner');
+
+                footerBanner.classList.add('hidden');
+                this.state.selectedBlockTokens = [];
+
+                // Update Progress
+                const progressPct = ((this.state.currentQuestionIdx) / lesson.questions.length) * 100;
+                progressBar.style.width = `${progressPct}%`;
+
+                if (question.type === 'mcq') {
+                    card.innerHTML = `
+                        <h3 class="text-xl sm:text-2xl font-black text-white mb-6">${question.prompt}</h3>
+                        <div class="grid grid-cols-1 gap-3">
+                            ${question.options.map((opt, idx) => `
+                                <button onclick="App.selectMCQOption(${idx})" class="mcq-opt p-4 rounded-2xl bg-[#202f36] border-2 border-[#37464f] hover:border-brand-blue font-bold text-left text-white transition-all text-base flex items-center justify-between">
+                                    <span>${opt}</span>
+                                    <span class="w-6 h-6 rounded-full border-2 border-gray-500 flex items-center justify-center text-xs text-gray-400">${idx+1}</span>
+                                </button>
+                            `).join('')}
+                        </div>
+                    `;
+                } else if (question.type === 'fill') {
+                    card.innerHTML = `
+                        <h3 class="text-xl sm:text-2xl font-black text-white mb-6">${question.prompt}</h3>
+                        <div class="bg-[#202f36] p-6 rounded-2xl border border-[#37464f] font-mono text-lg flex items-center gap-2 flex-wrap text-brand-green">
+                            <span>${question.codeBefore}</span>
+                            <input id="fill-input" type="text" autocomplete="off" class="bg-[#131f24] border-2 border-brand-blue rounded-xl px-3 py-1 text-white focus:outline-none w-32 text-center" placeholder="code">
+                            <span>${question.codeAfter}</span>
+                        </div>
+                    `;
+                } else if (question.type === 'blocks') {
+                    card.innerHTML = `
+                        <h3 class="text-xl sm:text-2xl font-black text-white mb-4">${question.prompt}</h3>
+                        <div id="target-dropzone" class="min-h-[60px] bg-[#202f36] border-2 border-dashed border-[#37464f] rounded-2xl p-3 flex flex-wrap gap-2 mb-6">
+                            <!-- Tokens drop here -->
+                        </div>
+                        <div id="source-blocks" class="flex flex-wrap gap-3">
+                            ${question.blocks.map(b => `
+                                <button onclick="App.tapBlock('${b}', this)" class="px-4 py-2 bg-[#202f36] border-2 border-[#37464f] hover:border-brand-blue rounded-xl font-mono text-sm font-bold text-brand-blue shadow-sm">
+                                    ${b}
+                                </button>
+                            `).join('')}
+                        </div>
+                    `;
+                }
+            },
+
+            selectMCQOption: function(idx) {
+                document.querySelectorAll('.mcq-opt').forEach((btn, i) => {
+                    if (i === idx) {
+                        btn.classList.add('border-brand-blue', 'bg-brand-blue/10');
+                        btn.setAttribute('data-selected', 'true');
+                    } else {
+                        btn.classList.remove('border-brand-blue', 'bg-brand-blue/10');
+                        btn.removeAttribute('data-selected');
+                    }
+                });
+            },
+
+            tapBlock: function(token, btnEl) {
+                const zone = document.getElementById('target-dropzone');
+                if (btnEl.classList.contains('opacity-30')) return;
+
+                btnEl.classList.add('opacity-30');
+                this.state.selectedBlockTokens.push(token);
+
+                const tokenTag = document.createElement('span');
+                tokenTag.className = "px-3 py-1.5 bg-brand-blue text-white rounded-xl font-mono text-sm font-bold animate-pop cursor-pointer";
+                tokenTag.textContent = token;
+                tokenTag.onclick = () => {
+                    tokenTag.remove();
+                    btnEl.classList.remove('opacity-30');
+                    this.state.selectedBlockTokens = this.state.selectedBlockTokens.filter(t => t !== token);
+                };
+                zone.appendChild(tokenTag);
+            },
+
+            checkAnswer: function() {
+                const question = this.state.currentLesson.questions[this.state.currentQuestionIdx];
+                let isCorrect = false;
+
+                if (question.type === 'mcq') {
+                    const selected = document.querySelector('.mcq-opt[data-selected="true"]');
+                    if (selected) {
+                        const opts = Array.from(document.querySelectorAll('.mcq-opt'));
+                        const selectedIdx = opts.indexOf(selected);
+                        isCorrect = (selectedIdx === question.answer);
+                    }
+                } else if (question.type === 'fill') {
+                    const val = document.getElementById('fill-input').value.trim();
+                    isCorrect = (val === question.answer);
+                } else if (question.type === 'blocks') {
+                    isCorrect = (JSON.stringify(this.state.selectedBlockTokens) === JSON.stringify(question.target));
+                }
+
+                this.showFeedback(isCorrect, question.explanation);
+            },
+
+            showFeedback: function(isCorrect, explanation) {
+                const banner = document.getElementById('feedback-banner');
+                const title = document.getElementById('feedback-title');
+                const msg = document.getElementById('feedback-msg');
+                const icon = document.getElementById('feedback-icon');
+                const btn = document.getElementById('btn-check-answer');
+
+                banner.classList.remove('hidden', 'bg-brand-green/20', 'bg-brand-red/20', 'border-brand-green', 'border-brand-red');
+                
+                if (isCorrect) {
+                    banner.classList.add('bg-brand-green/20', 'border', 'border-brand-green');
+                    icon.innerHTML = `<i class="fa-solid fa-circle-check text-brand-green"></i>`;
+                    title.textContent = "Awesome job!";
+                    title.className = "font-black text-lg text-brand-green";
+                    msg.textContent = explanation;
+                    confetti({ particleCount: 40, spread: 60, origin: { y: 0.8 } });
+                } else {
+                    banner.classList.add('bg-brand-red/20', 'border', 'border-brand-red');
+                    icon.innerHTML = `<i class="fa-solid fa-circle-xmark text-brand-red"></i>`;
+                    title.textContent = "Unlimited Lives Active!";
+                    title.className = "font-black text-lg text-brand-red";
+                    msg.textContent = `No stress! Mistakes help you learn. ${explanation}`;
+                }
+
+                btn.textContent = "Continue";
+                btn.onclick = () => this.nextQuestion();
+            },
+
+            nextQuestion: function() {
+                const btn = document.getElementById('btn-check-answer');
+                btn.textContent = "Check Answer";
+                btn.onclick = () => this.checkAnswer();
+
+                this.state.currentQuestionIdx++;
+                if (this.state.currentQuestionIdx >= this.state.currentLesson.questions.length) {
+                    this.completeLesson();
+                } else {
+                    this.renderCurrentQuestion();
+                }
+            },
+
+            completeLesson: function() {
+                const lesson = this.state.currentLesson;
+                if (!this.state.completedLessons.includes(lesson.id)) {
+                    this.state.completedLessons.push(lesson.id);
+                    this.state.xp += lesson.xp;
+                }
+                this.saveState();
+                this.updateStatsUI();
+                this.renderLearnPath();
+                this.renderQuests();
+
+                // Celebration Overlay inside card
+                const card = document.getElementById('question-card');
+                card.innerHTML = `
+                    <div class="text-center my-auto flex flex-col items-center">
+                        <div class="text-6xl mb-4 animate-bounce">🎉</div>
+                        <h2 class="text-3xl font-black text-white">Lesson Completed!</h2>
+                        <p class="text-gray-300 mt-2">You earned <span class="text-brand-yellow font-black">+${lesson.xp} XP</span></p>
+                        <div class="mt-6 p-4 bg-[#202f36] rounded-2xl border border-brand-green/40 text-xs text-brand-green font-bold">
+                            ❤️ Zero hearts lost. Unlimited practice power!
+                        </div>
+                    </div>
+                `;
+
+                const btn = document.getElementById('btn-check-answer');
+                btn.textContent = "Finish";
+                btn.onclick = () => this.exitLesson();
+            },
+
+            // Sandbox Code Execution
+            runSandboxCode: async function() {
+                const code = document.getElementById('sandbox-editor').value;
+                const outputEl = document.getElementById('sandbox-output');
+                outputEl.textContent = "Executing...";
+
+                if (!this.pyodide) {
+                    outputEl.textContent = "Python engine loading... Please wait a moment.";
+                    return;
+                }
+
+                try {
+                    // Redirect standard output
+                    this.pyodide.runPython(`
+                        import sys
+                        import io
+                        sys.stdout = io.StringIO()
+                    `);
+                    this.pyodide.runPython(code);
+                    const stdout = this.pyodide.runPython("sys.stdout.getvalue()");
+                    outputEl.textContent = stdout || "(Code executed successfully with no print output)";
+                } catch (err) {
+                    outputEl.textContent = `Error:\n${err.message}`;
+                }
+            },
+
+            resetSandbox: function() {
+                document.getElementById('sandbox-editor').value = `print("Hello from PyLingo Sandbox!")`;
+                document.getElementById('sandbox-output').textContent = "Console reset.";
+            },
+
+            // Render Quests
+            renderQuests: function() {
+                const container = document.getElementById('quests-container');
+                container.innerHTML = '';
+
+                QUESTS_DATA.forEach(q => {
+                    let progress = 0;
+                    if (q.id === 'q1') progress = this.state.completedLessons.length >= 1 ? 1 : 0;
+                    if (q.id === 'q2') progress = Math.min(this.state.xp, 50);
+                    if (q.id === 'q3') progress = Math.min(this.state.completedLessons.length, 3);
+
+                    const completed = progress >= q.target;
+
+                    container.innerHTML += `
+                        <div class="bg-[#202f36] p-4 rounded-2xl border border-[#37464f] flex items-center gap-4">
+                            <div class="text-3xl p-3 bg-[#131f24] rounded-2xl border border-[#37464f]">${q.icon}</div>
+                            <div class="flex-1">
+                                <h4 class="font-black text-white text-base">${q.title}</h4>
+                                <p class="text-xs text-gray-400">${q.desc}</p>
+                                <div class="w-full bg-[#131f24] h-2 rounded-full mt-2 overflow-hidden">
+                                    <div class="bg-brand-yellow h-full rounded-full" style="width: ${(progress/q.target)*100}%"></div>
+                                </div>
+                            </div>
+                            <div>
+                                ${completed ? '<span class="text-brand-green font-black text-xs">DONE</span>' : `<span class="text-xs text-gray-400 font-bold">${progress}/${q.target}</span>`}
+                            </div>
+                        </div>
+                    `;
+                });
+            },
+
+            // Render Leaderboard
+            renderLeaderboard: function() {
+                const list = document.getElementById('leaderboard-list');
+                const dummyLeaders = [
+                    { name: "CodeNinja", xp: 420, avatar: "🥷" },
+                    { name: "PythonPy", xp: 310, avatar: "🐍" },
+                    { name: "You (Learner)", xp: this.state.xp, avatar: "🚀", isUser: true },
+                    { name: "ByteBoss", xp: 180, avatar: "🤖" },
+                    { name: "AlgoQueen", xp: 95, avatar: "👑" }
+                ];
+
+                dummyLeaders.sort((a,b) => b.xp - a.xp);
+
+                list.innerHTML = dummyLeaders.map((user, idx) => `
+                    <div class="p-4 flex items-center justify-between ${user.isUser ? 'bg-brand-blue/10 border-l-4 border-brand-blue' : ''}">
+                        <div class="flex items-center gap-4">
+                            <span class="font-black text-lg w-6 ${idx === 0 ? 'text-brand-yellow' : 'text-gray-400'}">#${idx+1}</span>
+                            <span class="text-2xl">${user.avatar}</span>
+                            <span class="font-extrabold text-white text-sm">${user.name}</span>
+                        </div>
+                        <span class="font-black text-brand-blue">${user.xp} XP</span>
+                    </div>
+                `).join('');
+            },
+
+            showUnlimitedModal: function() {
+                document.getElementById('modal-unlimited').classList.remove('hidden');
+            },
+
+            hideUnlimitedModal: function() {
+                document.getElementById('modal-unlimited').classList.add('hidden');
+            }
+        };
+
+        // Initialize on load
+        window.addEventListener('DOMContentLoaded', () => App.init());
+    </script>
+</body>
+</html>
